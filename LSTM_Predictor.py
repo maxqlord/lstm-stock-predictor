@@ -2,7 +2,6 @@ import pandas as pd
 import os 
 #TODO Check out pathlib package to replace os.path.join
 #TODO Add Alphavantage data source
-#TODO Add error handling to load_data() once input is created
 
 def ticker_input(message = "Enter the ticker of the stock you want to examine: "):
 	""" Ask the user for the ticker they want to examine and return the chosen ticker
