@@ -1,6 +1,5 @@
 import pandas as pd
-import os 
-#TODO Check out pathlib package to replace os.path.join
+from pathlib import Path
 #TODO Add Alphavantage data source
 
 def ticker_input(message = "Enter the ticker of the stock you want to examine: "):
@@ -9,7 +8,7 @@ def ticker_input(message = "Enter the ticker of the stock you want to examine: "
 	message: Message to display to the user when asking for a ticker input
 	"""
 	ticker = input(message)
-	return ticker
+	return ticker.upper()
 
 def load_data(ticker, data_source="kaggle"):
 	""" Load stock market data from designated data source.
@@ -19,9 +18,9 @@ def load_data(ticker, data_source="kaggle"):
 	data_source: Designates which online resource to get data from, Kaggle or Alphavantage
 	"""
 
-	if data_source == "kaggle":  #Load directly into DataFrame from csv file
-		file_path = os.path.join("Stocks",ticker + ".us.txt")
-		if os.path.isfile(file_path):
+	if data_source == "kaggle":  #Load directly into DataFrame from csv file file_path = os.path.join("Stocks",ticker + ".us.txt")
+		file_path = Path("Stocks/") / (ticker + ".us.txt")
+		if file_path.exists():
 			df = pd.read_csv(file_path, delimiter=",", usecols=["Date","Open","High","Low","Close"]) #ignore volume, openInt columns
 			print("Loaded data for ticker " + ticker + " from Kaggle")
 			return df.sort_values("Date")
