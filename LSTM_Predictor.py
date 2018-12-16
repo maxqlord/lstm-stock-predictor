@@ -5,7 +5,6 @@ import config
 import datetime as dt
 import matplotlib.pyplot as plt
 #TODO Sanitize ticker input
-#TODO Fix issues with stock splits
 
 def ticker_input(message = "Enter the ticker of the stock you want to examine: "):
 	""" Ask the user for the ticker they want to examine and return the chosen ticker
@@ -87,13 +86,32 @@ def load_data(ticker, data_source):
 		return load_data_alphavantage(ticker)
 
 def graph_imported_data(df, ticker):
+	""" Graph stock market data for designated ticker.
+
+	df: 	Pandas DataFrame containing ticker stock data
+	ticker:	Market identifier that specifies the stock to get data for. Ex. "AAL" for American Airlines
+	"""
 	plt.figure(figsize = (10,7))
 	plt.title("Historical Stock Market Data of " + ticker)
 	plt.xlabel("Date")
-	plt.ylabel("Daily Closing Price")
-	plt.xticks(range(0,df.shape[0],int(df.shape[0]/10)),df['Date'].loc[::int(df.shape[0]/10)], rotation=25)
+	plt.ylabel("Daily Adjusted Closing Price")  #adjusted closing price factors in dividends and splits
+	plt.xticks(range(0,df.shape[0],int(df.shape[0]/10)),df['Date'].loc[::int(df.shape[0]/10)], rotation=25)  #convert x values to dates
 	plt.plot(range(df.shape[0]), df["Close"])  #range created from number of rows in df
 	plt.show()
+
+def split_train_test_data(df, training_percentage):
+	""" Split stock data into training and test data.
+
+	df: 				 Pandas DataFrame containing ticker stock data
+	training_percentage: Percentage of data that will be included in the training set
+	"""
+	closing_prices = df.loc[:,"Close"].values  #select all rows, close column and convert to np array
+	length = len(closing_prices)
+	training_prices = closing_prices[:int(training_percentage*length)]
+	test_prices = closing_prices[int(training_percentage*length):]
+	print("Training Set Length: " + str(len(training_prices)))
+	print("Test Set Length: " + str(len(test_prices)))
+	return training_prices, test_prices
 
 def main():
 	ticker = ticker_input()
@@ -101,6 +119,8 @@ def main():
 	df = load_data(ticker, source)
 	print(df.head()) #Test data import
 	graph_imported_data(df, ticker)
+	training_percentage = .9
+	train_data, test_data = split_train_test_data(df, training_percentage)
 
 main()
 
