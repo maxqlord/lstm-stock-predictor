@@ -3,7 +3,9 @@ from pathlib import Path
 import requests
 import config 
 import datetime as dt
+import matplotlib.pyplot as plt
 #TODO Sanitize ticker input
+#TODO Fix issues with stock splits
 
 def ticker_input(message = "Enter the ticker of the stock you want to examine: "):
 	""" Ask the user for the ticker they want to examine and return the chosen ticker
@@ -47,12 +49,12 @@ def load_data_alphavantage(ticker):
 	api_key = config.api_key #Pull api_key from config.py
 	filename = ticker + ".csv" #Cache requested csv files
 	file_path = Path("Cache/") / filename
-	if file_path.exists():  #Call cached csv
+	if file_path.exists():  #Call cached csv- testing purposes only
 		print("Data for ticker " + ticker + " already exists. Loading Alphavantage data from CSV")
 		df = pd.read_csv(file_path, delimiter=",", usecols=["Date","Low","High","Close","Open"])
 		return df
 	else:  #considered directly downloading csv but wanted to avoid direct download without warning
-		url_string = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=" + ticker + "&outputsize=full&apikey=" + api_key
+		url_string = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=" + ticker + "&outputsize=full&apikey=" + api_key
 		r = requests.get(url_string)
 		data_json = r.json()
 		if len(data_json) != 1:  #valid response
@@ -84,8 +86,26 @@ def load_data(ticker, data_source):
 	if data_source == "alphavantage":  #Load JSON data into csv into DataFrame. Reference: https://www.alphavantage.co/documentation/#daily
 		return load_data_alphavantage(ticker)
 
+def graph_imported_data(df, ticker):
+	plt.figure(figsize = (6,6.75))
+	plt.title("Historical Stock Market Data of " + ticker)
+	plt.xlabel("Date")
+	plt.ylabel("High Daily Price")
+	plt.xticks(range(0,df.shape[0],int(df.shape[0]/10)),df['Date'].loc[::int(df.shape[0]/10)], rotation=25)
+	plt.plot(range(df.shape[0]), df["High"])  #range created from number of rows in df
+	plt.show()
 
-ticker = ticker_input()
-source = source_input()
-df = load_data(ticker, source)
-print(df.head()) #Test data import
+
+def main():
+	ticker = ticker_input()
+	source = source_input()
+	df = load_data(ticker, source)
+	print(df.head()) #Test data import
+	graph_imported_data(df, ticker)
+
+main()
+
+
+
+
+
