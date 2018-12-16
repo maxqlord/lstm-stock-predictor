@@ -61,8 +61,10 @@ def load_data(ticker, data_source):
 					formatted_date = dt.datetime.strptime(date, "%Y-%m-%d") #https://docs.python.org/3/library/datetime.html#datetime-objects
 					row = [formatted_date.date(),float(values["3. low"]),float(values["2. high"]), 
 							float(values["4. close"]),float(values["1. open"])] #new row
-					df.loc[-1,:] = row 
-					df.index = df.index + 1
+					print(row)
+					df.loc[-1,:] = row  #select row -1 and all columns and set to created data row
+					print(df.head())
+					df.index = df.index + 1 #increment row to add data to
 					df = df.sort_values("Date")
 				df.to_csv(file_path)
 				print("Data saved to: " + filename)
