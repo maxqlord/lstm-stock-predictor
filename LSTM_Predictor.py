@@ -63,7 +63,7 @@ def load_data_alphavantage(ticker):
 			for date, values in data.items():
 				formatted_date = dt.datetime.strptime(date, "%Y-%m-%d") #https://docs.python.org/3/library/datetime.html#datetime-objects
 				row = [formatted_date.date(),float(values["3. low"]),float(values["2. high"]), 
-						float(values["4. close"]),float(values["1. open"])] #new row
+						float(values["5. adjusted close"]),float(values["1. open"])] #new row
 				df.loc[-1,:] = row  #select row -1 and all columns and set to created data row
 				df.index = df.index + 1 #increment row to add data to
 				df = df.sort_values("Date")
@@ -87,14 +87,13 @@ def load_data(ticker, data_source):
 		return load_data_alphavantage(ticker)
 
 def graph_imported_data(df, ticker):
-	plt.figure(figsize = (6,6.75))
+	plt.figure(figsize = (10,7))
 	plt.title("Historical Stock Market Data of " + ticker)
 	plt.xlabel("Date")
-	plt.ylabel("High Daily Price")
+	plt.ylabel("Daily Closing Price")
 	plt.xticks(range(0,df.shape[0],int(df.shape[0]/10)),df['Date'].loc[::int(df.shape[0]/10)], rotation=25)
-	plt.plot(range(df.shape[0]), df["High"])  #range created from number of rows in df
+	plt.plot(range(df.shape[0]), df["Close"])  #range created from number of rows in df
 	plt.show()
-
 
 def main():
 	ticker = ticker_input()
