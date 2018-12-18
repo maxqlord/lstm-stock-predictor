@@ -171,6 +171,47 @@ def graph_preprocessed_data(df,train_data, ticker):
 	plt.plot(range(train_data.shape[0]), train_data)  #range created from number of rows in df
 	plt.show()
 
+class DataGeneratorSeq(object):
+
+	def __init__(self, prices, batch_size, time_steps):
+		""" Initialize data generator.
+		prices: 	Full training set
+		batch_size: Size of batches of data
+		time_steps: Number of steps in each training
+		"""
+		self.prices = prices  #train_data
+		self.prices_len = len(prices) - time_steps  #length of remaining dataset
+		self.batch_size = batch_size  #size of batch of data
+		self.time_steps = time_steps  #number of time steps in one training
+		self.segments = self.prices_len // self.batch_size  #number of full batches
+		self.cursor = [x * self.segments for x in range(self.batch_size)]  #array of starting index of each batch
+
+	def next_batch(self):
+		""" Return next batch of data and its labels."""
+		batch_data = np.zeros(self.batch_size, dtype=np.float32)  #Instantiate empty batch_data np arrays
+		batch_labels = np.zeros(self.batch_size, dtype=np.float32)
+		for data_point_index in range(self.batch_size):  #Loop through each data point in batch
+			if self.cursor[data_point_index] + 1 >= self.prices_len:  #if overall index of start of batch + 1 is greater than or equal to dataset length
+				self.cursor[data_point_index] = np.random.randint(0,(data_point_index+1)*self.segments)  #set overall index to a randow index in the dataset
+
+			batch_data[data_point_index] = self.prices[self.cursor[data_point_index]]  #batch data at index data_point_index set to data in prices at data_point_index
+			batch_labels[data_point_index] = self.prices[self.cursor[data_point_index] + np.random.randint(0,5)]  #batch label at index data_point_index set to price data close to data_point_index
+			self.cursor[data_point_index] = (self.cursor[data_point_index]+1) % self.prices_len  #update cursor position to select index
+
+		return batch_data, batch_labels
+
+	def output_batches(self):
+		""" Return set of batches of input data."""
+		all_batch_data = []
+		all_batch_labels = []
+		for t in range(self.time_steps):
+			data, labels = self.next_batch()
+			all_batch_data.append(data)
+			all_batch_labels.append(labels)
+
+		return all_batch_data, all_batch_labels
+
+
 def main():
 	training_percentage = .9
 	window_count = 5
@@ -189,6 +230,16 @@ def main():
 	print("Data Normalized")
 	graph_preprocessed_data(df, train_data, ticker) #order of scaling and normalizing matters
 	print("Preprocessing Completed")
+
+	batch_size = 5
+	future_steps = 5
+	dgs = DataGeneratorSeq(train_data, batch_size, future_steps)
+	all_batch_data, all_batch_labels = dgs.output_batches()
+	for index, (data, label) in enumerate(zip(all_batch_data, all_batch_labels)):
+		print("Batch " + str(index))
+		print("\tInputs: ", data)
+		print("\tOutputs: ", label)
+
 
 main()
 
