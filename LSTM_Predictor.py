@@ -6,6 +6,7 @@ import datetime as dt
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
+import tensorflow as tf
 #TODO Sanitize ticker input
 #TODO Fix line length
 
@@ -212,7 +213,8 @@ class DataGeneratorSeq(object):
 		return all_batch_data, all_batch_labels
 
 
-def main():
+def preprocessing():
+	""" Perform preprocessing for dataset."""
 	training_percentage = .9
 	window_count = 5
 	EMA = 0.0
@@ -230,16 +232,81 @@ def main():
 	print("Data Normalized")
 	graph_preprocessed_data(df, train_data, ticker) #order of scaling and normalizing matters
 	print("Preprocessing Completed")
+	return train_data, test_data, all_preprocessed_data
 
-	batch_size = 5
-	future_steps = 5
-	dgs = DataGeneratorSeq(train_data, batch_size, future_steps)
-	all_batch_data, all_batch_labels = dgs.output_batches()
+def data_augmentation(train_data, batch_size, future_steps):
+	""" Create more data for training.
+	train_data:   Set of scaled, normalized, and smoothed data to train network
+	batch_size:   Number of augmented data points per batch
+	future_steps: Number of time steps into future
+	"""
+	dgs = DataGeneratorSeq(train_data, batch_size, future_steps)  #generate data
+	all_batch_data, all_batch_labels = dgs.output_batches()  
 	for index, (data, label) in enumerate(zip(all_batch_data, all_batch_labels)):
 		print("Batch " + str(index))
 		print("\tInputs: ", data)
 		print("\tOutputs: ", label)
+	return all_batch_data, all_batch_labels
 
+def create_tf_input_output(batch_size, dimensionality, time_steps):
+	""" Create tf placeholders based on model parameters.
+	batch_size: 	Number of data points per batch
+	dimensionality: dimensionality of input data
+	time_steps: 	Number of time steps into future
+	"""
+	train_inputs = []
+	train_outputs = []
+	for step in range(time_steps):
+		train_inputs.append(tf.placeholder(tf.float32, shape=[batch_size, dimensionality], name="train_inputs_" + str(step)))  #create inputs placeholder
+		train_outputs.append(tf.placeholder(tf.float32, shape=[batch_size, 1], name="train_outputs_" + str(step)))  #create outputs placeholder
+	return train_inputs, train_outputs
+
+def create_LSTM_layers(neurons_per_cell, num_layers, dropout):
+	"""  Define parameters for LSTM layers and regression layer.  Use tf's MultiRNNCell for LSTM layers
+	neurons_per_cell: Number of hidden nodes in each LSTM layers
+	num_layers: 	  Number of LSTM layers
+	dropout: 		  Amount of output and state to forget
+	"""
+	lstm_cells = [tf.contrib.rnn.LSTMCell(  #https://www.tensorflow.org/api_docs/python/tf/nn/rnn_cell/LSTMCell
+		num_units=neurons_per_cell[layer],  #number of nodes in layer
+		state_is_tuple=True,  #states are 2-tuples of c_state and m_state
+		initializer= tf.contrib.layers.xavier_initializer()  #weight initialization strategy https://www.tensorflow.org/api_docs/python/tf/contrib/layers/xavier_initializer
+		) for layer in range(num_layers)]  #create a 1D array of LSTM layers
+		
+	drop_lstm_cells = [tf.contrib.rnn.DropoutWrapper(  #Adds dropout to input and output of layer https://www.tensorflow.org/api_docs/python/tf/nn/rnn_cell/DropoutWrapper
+		lstm,  #layer
+		input_keep_prob = 1.0,  #proportion of input to keep
+		output_keep_prob = 1.0 - dropout,  #proportion of output to keep
+		state_keep_prob = 1.0 - dropout  #proportion of state to keep
+		) for lstm in lstm_cells]  #apply dropout to each layer
+	drop_multi_cell = tf.contrib.rnn.MultiRNNCell(drop_lstm_cells)  #store LSTM drop in one MultiRNNCell object
+	multi_cell = tf.contrib.rnn.MultiRNNCell(lstm_cells)  #store LSTM layers in one MultiRNNCell object
+	w = tf.get_variable("w", shape = [neurons_per_cell[-1], 1], initializer = tf.contrib.layers.xavier_initializer())  #create variable with given parameters
+	b = tf.get_variable("b", initializer = tf.random_uniform([1], -.1, .1))  #create variable with given paramters
+	return drop_multi_cell, multi_cell, w, b
+
+def training(train_data, test_data, all_preprocessed_data):
+	""" Perform model training.
+	train_data: 		   Set of scaled, normalized, and smoothed data to train network
+	test_data: 			   Set of scaled and normalized data to test network
+	all_preprocessed_data: Set of all preprocessed data
+	"""
+	augment_batch_size = 5
+	augment_time_steps = 5
+	all_augment_batch_data, all_augment_batch_labels = data_augmentation(train_data, augment_batch_size, augment_time_steps)
+	dimensionality = 1  #Dimensionality of data: 1D
+	time_steps = 50  #Number of time steps into future
+	batch_size = 500  #Data points in a batch
+	neurons_per_cell = [200, 200, 150]  #Number of hidden nodes in each LSTM layer
+	num_layers = len(neurons_per_cell)
+	dropout = .2  #proportion of data to drop
+	tf.reset_default_graph()
+	train_inputs, train_outputs = create_tf_input_output(batch_size, dimensionality, time_steps)  #create placeholder tf inputs and outputs
+	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
+
+def main():
+	train_data, test_data, all_preprocessed_data = preprocessing()
+	training(train_data, test_data, all_preprocessed_data)
 
 main()
 
