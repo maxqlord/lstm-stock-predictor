@@ -318,6 +318,41 @@ def calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs
 	split_outputs = tf.split(all_outputs, time_steps, axis=0)  #Split output to list of tensors of size time_steps- loss between prediction and price
 	return cell_state, hidden_state, state_tensor, split_outputs
 
+def calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_layers, time_steps, split_outputs, train_outputs, learning_decay_rate, clipping_ratio):
+	"""  Calculate total Mean Squared Error of predictions and outputs and define optimizer
+	cell_state:	   		 List of tf variables storing LSTM cell state
+	hidden_state:  		 List of tf variables storing LSTM hidden state
+	state_tensor:  		 Tensor with size [batch_size, cell_state_size]
+	num_layers:    		 Number of LSTM layers
+	time_steps:	   		 Number of time steps into future
+	split_outputs: 		 List of tensors of size time_steps storing output
+	train_outputs: 		 List of tf placeholders for outputs
+	learning_decay_rate: Rate of learning decay for optimizer
+	clipping_ratio: 	 Clipping ratio for gradients
+	"""
+	print("Calculating Training Loss")
+	loss = 0.0
+	with tf.control_dependencies([tf.assign(cell_state[layer], state_tensor[layer][0]) for layer in range(num_layers)]+  #execute for loop after assigns
+								 [tf.assign(hidden_state[layer], state_tensor[layer][1]) for layer in range(num_layers)]):  #fill cell and hidden state
+		for step in range(time_steps):  #calculate total loss
+			loss += tf.reduce_mean(.5*(split_outputs[step]-train_outputs[step])**2)
+
+	print("Defining Learning Rate Decay")
+	global_step = tf.Variable(0, trainable = False)  #total number of training steps
+	inc_global_step = tf.assign(global_step, global_step + 1)
+	tf_learning_rate = tf.placeholder(shape = None, dtype = tf.float32)
+	tf_min_learning_rate = tf.placeholder(shape = None,dtype = tf.float32)
+	learning_rate = tf.maximum(
+		tf.train.exponential_decay(tf_learning_rate, global_step, decay_steps=1, decay_rate=learning_decay_rate, staircase=True),  #decay learning rate discrete intervals
+		tf_min_learning_rate)
+
+	print("Defining TensorFlow Optimizations")
+	optimizer = tf.train.AdamOptimizer(learning_rate)  #instantiate adam optimiser
+	gradients, v = zip(*optimizer.compute_gradients(loss))  #computs gradients of loss for variables- returns list of gradient variable pairs
+	gradients, global_norm = tf.clip_by_global_norm(gradients, 5.0)  #clips garidents
+	optimizer = optimizer.apply_gradients(zip(gradients, v))  #applies new gradients to optimizer
+
+
 def training(train_data, test_data, all_preprocessed_data):
 	""" Perform model training.
 	train_data: 		   Set of scaled, normalized, and smoothed data to train network
@@ -332,12 +367,14 @@ def training(train_data, test_data, all_preprocessed_data):
 	batch_size = 500  #Data points in a batch
 	neurons_per_cell = [200, 200, 150]  #Number of hidden nodes in each LSTM layer
 	num_layers = len(neurons_per_cell)
-	dropout = .2  #proportion of data to drop
+	dropout = 0.2  #proportion of data to drop
+	learning_decay_rate = 0.5
+	clipping_ratio = 5.0  #gradient clipping ratio
 	tf.reset_default_graph()
 	train_inputs, train_outputs = create_tf_input_output(batch_size, dimensionality, time_steps)  #create placeholder tf inputs and outputs
 	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
-	cell_state, hidden_state, state_tensor, split_outputs = calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell)
-
+	cell_state, hidden_state, state_tensor, split_outputs = calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell)  #Calculate LSTM layer output
+	optimizer = calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_layers, time_steps, split_outputs, train_outputs, learning_decay_rate, clipping_ratio)
 
 def main():
 	train_data, test_data, all_preprocessed_data = preprocessing()
