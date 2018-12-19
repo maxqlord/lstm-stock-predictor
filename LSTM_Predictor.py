@@ -251,7 +251,7 @@ def data_augmentation(train_data, batch_size, future_steps):
 def create_tf_input_output(batch_size, dimensionality, time_steps):
 	""" Create tf placeholders based on model parameters.
 	batch_size: 	Number of data points per batch
-	dimensionality: dimensionality of input data
+	dimensionality: Dimensionality of input data
 	time_steps: 	Number of time steps into future
 	"""
 	train_inputs = []
@@ -281,9 +281,42 @@ def create_LSTM_layers(neurons_per_cell, num_layers, dropout):
 		) for lstm in lstm_cells]  #apply dropout to each layer
 	drop_multi_cell = tf.contrib.rnn.MultiRNNCell(drop_lstm_cells)  #store LSTM drop in one MultiRNNCell object
 	multi_cell = tf.contrib.rnn.MultiRNNCell(lstm_cells)  #store LSTM layers in one MultiRNNCell object
-	w = tf.get_variable("w", shape = [neurons_per_cell[-1], 1], initializer = tf.contrib.layers.xavier_initializer())  #create variable with given parameters
-	b = tf.get_variable("b", initializer = tf.random_uniform([1], -.1, .1))  #create variable with given paramters
+	w = tf.get_variable("w", shape = [neurons_per_cell[-1], 1], initializer = tf.contrib.layers.xavier_initializer())  #create weights variable
+	b = tf.get_variable("b", initializer = tf.random_uniform([1], -.1, .1))  #create linear regression variable
 	return drop_multi_cell, multi_cell, w, b
+
+def calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell):
+	"""  Calculate output of LSTM layers
+	neurons_per_cell: Number of hidden nodes in each LSTM layers
+	num_layers: 	  Number of LSTM layers
+	batch_size: 	  Number of data points per batch
+	train_inputs: 	  List of tf placeholders for inputs
+	time_steps: 	  Number of time steps into future
+	w: 				  LSTM weight variable
+	b: 				  Linear regression weight variable
+	drop_multi_cell:  MultiRNNCell with dropout included
+	"""
+	cell_state = []
+	hidden_state = []  
+	initial_state = []
+	for layer in range(num_layers):
+		cell_state.append(tf.Variable(tf.zeros([batch_size, neurons_per_cell[layer]]), trainable = False))  #do not add vairable to graph collection
+		hidden_state.append(tf.Variable(tf.zeros([batch_size, neurons_per_cell[layer]]), trainable = False))  #variable holding matrix filled with zeros of size batch, nodes in layer
+		initial_state.append(tf.contrib.rnn.LSTMStateTuple(cell_state[layer], hidden_state[layer]))  #add LSTM initial state object to list
+
+	all_inputs = tf.concat([tf.expand_dims(t,0) for t in train_inputs], axis = 0)  #tensor transformation to fit dynamic_rnn- [time_steps, batch_size, dimensionality]
+	all_lstm_outputs, state_tensor = tf.nn.dynamic_rnn(  #calculate LSTM outputs
+		drop_multi_cell, 
+		all_inputs, 
+		initial_state = tuple(initial_state), 
+		time_major = True,
+		dtype = tf.float32
+		)
+
+	all_lstm_outputs = tf.reshape(all_lstm_outputs, [batch_size*time_steps, neurons_per_cell[-1]])
+	all_outputs = tf.nn.xw_plus_b(all_lstm_outputs, w, b)  #calculate all outputs
+	split_outputs = tf.split(all_outputs, time_steps, axis=0)  #Split output to list of tensors of size time_steps- loss between prediction and price
+	return cell_state, hidden_state, state_tensor, split_outputs
 
 def training(train_data, test_data, all_preprocessed_data):
 	""" Perform model training.
@@ -303,6 +336,8 @@ def training(train_data, test_data, all_preprocessed_data):
 	tf.reset_default_graph()
 	train_inputs, train_outputs = create_tf_input_output(batch_size, dimensionality, time_steps)  #create placeholder tf inputs and outputs
 	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
+	cell_state, hidden_state, state_tensor, split_outputs = calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell)
+
 
 def main():
 	train_data, test_data, all_preprocessed_data = preprocessing()
