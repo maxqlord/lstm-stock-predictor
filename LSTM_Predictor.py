@@ -232,7 +232,7 @@ def preprocessing():
 	print("Data Normalized")
 	graph_preprocessed_data(df, train_data, ticker) #order of scaling and normalizing matters
 	print("Preprocessing Completed")
-	return train_data, test_data, all_preprocessed_data
+	return train_data, test_data, all_preprocessed_data, training_percentage
 
 def data_augmentation(train_data, batch_size, future_steps):
 	""" Create more data for training.
@@ -347,10 +347,11 @@ def calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_laye
 		tf_min_learning_rate)
 
 	print("Defining TensorFlow Optimizations")
-	optimizer = tf.train.AdamOptimizer(learning_rate)  #instantiate adam optimiser
+	optimizer = tf.train.AdamOptimizer(learning_rate)  #instantiate adam optimizer
 	gradients, v = zip(*optimizer.compute_gradients(loss))  #computs gradients of loss for variables- returns list of gradient variable pairs
 	gradients, global_norm = tf.clip_by_global_norm(gradients, 5.0)  #clips garidents
 	optimizer = optimizer.apply_gradients(zip(gradients, v))  #applies new gradients to optimizer
+	return optimizer, loss, inc_global_step, tf_learning_rate, tf_min_learning_rate
 
 def define_prediction_functions(num_layers, neurons_per_cell, dimensionality, multi_cell, w, b):
 	"""  Define prediction-related tf functions
@@ -386,8 +387,118 @@ def define_prediction_functions(num_layers, neurons_per_cell, dimensionality, mu
 
 	return sample_inputs, sample_prediction, reset_sample_states
 
+def run_LSTM(train_data, batch_size, time_steps, train_inputs, train_outputs, optimizer, loss, sample_inputs, sample_prediction, all_preprocessed_data, reset_sample_states, epochs, n_predict_once, training_percentage, inc_gstep, tf_learning_rate, tf_min_learning_rate):
+	"""  Train network over multiple epochs
+	train_data: 		   Set of scaled, normalized, and smoothed data to train network
+	batch_size: 		   Number of augmented data points per batch
+	time_steps: 		   Number of time steps into future
+	train_inputs: 		   TF variable containing inputs
+	train_outputs: 		   TF variable containing outputs
+	optimizer: 			   Network optimizer
+	loss: 				   Total training loss
+	sample_inputs: 		   Prediction placeholder
+	sample_prediction:	   Sample prediction function
+	all_preprocessed_data: All train/test data after scaling
+	reset_sample_states:   Reset sample cell and hidden states to zeros
+	epochs: 			   Number of times to run network
+	n_predict_once:		   Number of steps to continuously predict
+	training_percentage:   Percentage of data that goes into training_set
+	inc_gstep:			   Increment global step
+	tf_learning_rate:	   Current learning rate
+	tf_min_learning_rate:  Minimum learning rate allowed
+	"""
+	valid_summary = 1  #Interval to make test predictions
+	train_data_len = train_data.size
+	train_loss_ot = []  #Store training loss over time
+	test_loss_ot = []  #Store test loss over time
+	predictions_over_time = []  #Store predictions
+	session = tf.InteractiveSession()  #tf session for shell
 
-def training(train_data, test_data, all_preprocessed_data):
+	tf.global_variables_initializer().run()  #initializes tf variables
+	loss_nondecrease_count = 0 	#Steps that loss hasn't decreased for learning decay
+	loss_nondecrease_threshold = 2  #If test loss hasn't increased in loss_nondecrease_threshold steps, decrease learning rate
+	average_loss = 0
+	dgs = DataGeneratorSeq(train_data,batch_size,time_steps)  #data generation
+	x_axis_sequence = []
+	start = int(training_percentage*len(all_preprocessed_data))
+	end = len(all_preprocessed_data)
+	test_points_seq = np.arange(start,end - n_predict_once,n_predict_once).tolist()  #Start of test predictions
+	print("Initialized")
+
+	for epoch in range(epochs):
+
+		for step in range(train_data_len//batch_size):  #for step in batch
+
+			all_batch_data, all_label_data = dgs.output_batches()  #data augmentation
+			feed_dict = {}  #dict to update tf placeholders
+			for i,(data,label) in enumerate(zip(all_batch_data, all_label_data)):            
+				feed_dict[train_inputs[i]] = data.reshape(-1,1)  #set up dict to set train_inputs to data
+				feed_dict[train_outputs[i]] = label.reshape(-1,1) #set up dict to set train_outputs to label
+
+			feed_dict.update({tf_learning_rate: 0.0001, tf_min_learning_rate:0.000001})  #add keys/values to feed_dict
+			_, l = session.run([optimizer, loss], feed_dict=feed_dict) #returns one step of calculations
+			average_loss += l  #currently total loss
+
+		if (epoch + 1) % valid_summary == 0:  #Make test prediction
+			average_loss = average_loss/(valid_summary*(train_data_len//batch_size))  #compute actual avg loss
+			if (epoch + 1) % valid_summary == 0:
+				print("Average loss at step " + str(epoch + 1) + ": " + str(average_loss))
+
+			train_loss_ot.append(average_loss)
+			average_loss = 0  #reset
+			predictions_seq = []
+			test_loss_seq = []
+
+			for data_index in test_points_seq:  #for each point in test set
+				test_loss = 0.0
+				predictions = []
+
+				if (epoch + 1) - valid_summary == 0:  #make prediction
+					x_axis = []
+
+				for price in range(data_index - time_steps + 1, data_index - 1):
+					current_price = all_preprocessed_data[price]  #current price
+					feed_dict[sample_inputs] = np.array(current_price).reshape(1,1)  #set sample_inputs to current_price array  
+					out = session.run(sample_prediction,feed_dict=feed_dict) #perform tf calculations
+
+				feed_dict = {}  #reset feed_dict
+				current_price = all_preprocessed_data[data_index - 1]
+				feed_dict[sample_inputs] = np.array(current_price).reshape(1,1)
+
+				for pred_i in range(n_predict_once):  #steps to  continuously predict
+					pred = session.run(sample_prediction,feed_dict=feed_dict) #predicted price 
+					predictions.append(np.asscalar(pred))
+					feed_dict[sample_inputs] = np.asarray(pred).reshape(-1,1)
+					if (epoch + 1) - valid_summary == 0:  #make prediction
+						x_axis.append(data_index+pred_i)  #add to list of x_axis data
+					test_loss += 0.5*(pred - all_preprocessed_data[data_index+pred_i])**2  #calculate MSE for test data
+
+				session.run(reset_sample_states)
+				predictions_seq.append(np.array(predictions))  #add predictions to list of predictions
+				test_loss /= n_predict_once  #average test loss per step
+				test_loss_seq.append(test_loss)  #add to list of test_loss
+				if (epoch + 1) - valid_summary == 0: 
+					x_axis_sequence.append(x_axis)  #add x axis data to overall x axis sequence
+
+			current_test_error = np.mean(test_loss_seq)  #current overall test error
+
+			if len(test_loss_ot) > 0 and current_test_error > min(test_loss_ot):  #loss has not decreased
+				loss_nondecrease_count += 1
+			else:  #loss decreased
+				loss_nondecrease_count = 0
+
+			if loss_nondecrease_count > loss_nondecrease_threshold:  #if loss hasn't decreased in too long
+				session.run(inc_gstep)  #increment global step
+				loss_nondecrease_count = 0  #reset loss decrease counter
+				print("\tDecreasing learning rate")
+
+			test_loss_ot.append(current_test_error)
+			print("\tTest Error: " + str(np.mean(test_loss_seq)))
+			predictions_over_time.append(predictions_seq)
+			print("\tFinished Predictions")
+	return predictions_over_time, x_axis_sequence
+
+def training(train_data, test_data, all_preprocessed_data, training_percentage):
 	""" Perform model training.
 	train_data: 		   Set of scaled, normalized, and smoothed data to train network
 	test_data: 			   Set of scaled and normalized data to test network
@@ -404,16 +515,19 @@ def training(train_data, test_data, all_preprocessed_data):
 	dropout = 0.2  #proportion of data to drop
 	learning_decay_rate = 0.5
 	clipping_ratio = 5.0  #gradient clipping ratio
+	epochs = 30
+	n_predict_once = 50
 	tf.reset_default_graph()
 	train_inputs, train_outputs = create_tf_input_output(batch_size, dimensionality, time_steps)  #create placeholder tf inputs and outputs
 	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
 	cell_state, hidden_state, state_tensor, split_outputs = calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell)  #Calculate LSTM layer output
-	optimizer = calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_layers, time_steps, split_outputs, train_outputs, learning_decay_rate, clipping_ratio)
+	optimizer, loss, inc_global_step, tf_learning_rate, tf_min_learning_rate = calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_layers, time_steps, split_outputs, train_outputs, learning_decay_rate, clipping_ratio)
 	sample_inputs, sample_prediction, reset_sample_states = define_prediction_functions(num_layers, neurons_per_cell, dimensionality, multi_cell, w, b)
-
+	predictions_over_time, x_axis_sequence = run_LSTM(train_data, batch_size, time_steps, train_inputs, train_outputs, optimizer, loss, sample_inputs, sample_prediction, 
+													  all_preprocessed_data, reset_sample_states, epochs, n_predict_once, training_percentage, inc_global_step, tf_learning_rate, tf_min_learning_rate)
 def main():
-	train_data, test_data, all_preprocessed_data = preprocessing()
-	training(train_data, test_data, all_preprocessed_data)
+	train_data, test_data, all_preprocessed_data, training_percentage = preprocessing()
+	training(train_data, test_data, all_preprocessed_data, training_percentage)
 
 main()
 
