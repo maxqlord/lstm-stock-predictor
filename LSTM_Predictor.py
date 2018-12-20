@@ -232,7 +232,7 @@ def preprocessing():
 	print("Data Normalized")
 	graph_preprocessed_data(df, train_data, ticker) #order of scaling and normalizing matters
 	print("Preprocessing Completed")
-	return train_data, test_data, all_preprocessed_data, training_percentage
+	return train_data, test_data, all_preprocessed_data, training_percentage, df
 
 def data_augmentation(train_data, batch_size, future_steps):
 	""" Create more data for training.
@@ -498,7 +498,45 @@ def run_LSTM(train_data, batch_size, time_steps, train_inputs, train_outputs, op
 			print("\tFinished Predictions")
 	return predictions_over_time, x_axis_sequence
 
-def training(train_data, test_data, all_preprocessed_data, training_percentage):
+def graph_results(best_epoch, all_preprocessed_data, predictions_over_time, x_axis_sequence, df, start_alpha, training_percentage):
+	""" Graph model results. 
+	best_epoch: 		   Epoch with best model performance
+	all_preprocessed_data: Set of all preprocessed data
+	predictions_over_time: List of all predictions
+	x_axis_sequence: 	   List of x axis data
+	df: 				   Pandas DataFrame of all data
+	start_alpha: 		   High alpha = newer predictions
+	training_percentage:   Percentage of data that goes into training_set
+	"""
+	plt.figure(figsize = (10,12))
+	plt.subplot(2,1,1)
+	plt.plot(range(df.shape[0]), all_preprocessed_data, color = "b")
+
+	alpha = np.arange(start_alpha, 1.1, (1.0 - start_alpha)/len(predictions_over_time[::3]))
+	for i, p in enumerate(predictions_over_time[::3]):
+		for x, y in zip(x_axis_sequence, p):
+			plt.plot(x, y, color = "r", alpha = alpha[i])
+
+	plt.title("Change in Test Predictions Over Time", fontsize=14)
+	plt.xlabel("Date", fontsize=14)
+	plt.xlabel("Closing Price", fontsize=14)
+	plt.xlim(int(training_percentage*len(all_preprocessed_data)), len(all_preprocessed_data))
+	plt.subplot(2,1,2)
+
+	plt.plot(range(df.shape[0]),all_preprocessed_data,color="b")
+	for x,y in zip(x_axis_sequence,predictions_over_time[best_epoch]):
+		plt.plot(x,y,color="r")
+
+	plt.title("Best Test Prediction Over Time",fontsize=14)
+	plt.xlabel("Date",fontsize=14)
+	plt.ylabel("Closing Price",fontsize=14)
+	plt.xlim(int(training_percentage*len(all_preprocessed_data)), len(all_preprocessed_data))
+	plt.show()
+
+
+
+
+def training(train_data, test_data, all_preprocessed_data, training_percentage, df):
 	""" Perform model training.
 	train_data: 		   Set of scaled, normalized, and smoothed data to train network
 	test_data: 			   Set of scaled and normalized data to test network
@@ -517,6 +555,8 @@ def training(train_data, test_data, all_preprocessed_data, training_percentage):
 	clipping_ratio = 5.0  #gradient clipping ratio
 	epochs = 30
 	n_predict_once = 50
+	best_epoch = 25
+	start_alpha = .25
 	tf.reset_default_graph()
 	train_inputs, train_outputs = create_tf_input_output(batch_size, dimensionality, time_steps)  #create placeholder tf inputs and outputs
 	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
@@ -525,9 +565,11 @@ def training(train_data, test_data, all_preprocessed_data, training_percentage):
 	sample_inputs, sample_prediction, reset_sample_states = define_prediction_functions(num_layers, neurons_per_cell, dimensionality, multi_cell, w, b)
 	predictions_over_time, x_axis_sequence = run_LSTM(train_data, batch_size, time_steps, train_inputs, train_outputs, optimizer, loss, sample_inputs, sample_prediction, 
 													  all_preprocessed_data, reset_sample_states, epochs, n_predict_once, training_percentage, inc_global_step, tf_learning_rate, tf_min_learning_rate)
+	
+	graph_results(best_epoch, all_preprocessed_data, predictions_over_time, x_axis_sequence, df, start_alpha, training_percentage)
 def main():
-	train_data, test_data, all_preprocessed_data, training_percentage = preprocessing()
-	training(train_data, test_data, all_preprocessed_data, training_percentage)
+	train_data, test_data, all_preprocessed_data, training_percentage, df = preprocessing()
+	training(train_data, test_data, all_preprocessed_data, training_percentage, df)
 
 main()
 
