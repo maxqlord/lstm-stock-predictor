@@ -263,7 +263,7 @@ def create_tf_input_output(batch_size, dimensionality, time_steps):
 
 def create_LSTM_layers(neurons_per_cell, num_layers, dropout):
 	"""  Define parameters for LSTM layers and regression layer.  Use tf's MultiRNNCell for LSTM layers
-	neurons_per_cell: Number of hidden nodes in each LSTM layers
+	neurons_per_cell: Number of hidden nodes in each LSTM layer
 	num_layers: 	  Number of LSTM layers
 	dropout: 		  Amount of output and state to forget
 	"""
@@ -352,6 +352,40 @@ def calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_laye
 	gradients, global_norm = tf.clip_by_global_norm(gradients, 5.0)  #clips garidents
 	optimizer = optimizer.apply_gradients(zip(gradients, v))  #applies new gradients to optimizer
 
+def define_prediction_functions(num_layers, neurons_per_cell, dimensionality, multi_cell, w, b):
+	"""  Define prediction-related tf functions
+	num_layers: 	  Number of LSTM layers
+	neurons_per_cell: Number of hidden nodes in each LSTM layer
+	dimensionality:   Dimensionality of input data
+	multi_cell: 	  LSTM layers object
+	w: 				  LSTM weights variable
+	b:				  Linear regression variable
+	"""
+	print("Defining Prediction Functions")
+	sample_inputs = tf.placeholder(tf.float32, shape=[1, dimensionality])
+	sample_cell_state = [] 
+	sample_hidden_state = []
+	initial_sample_state = []
+	for layer in range(num_layers):
+		sample_cell_state.append(tf.Variable(tf.zeros([1, neurons_per_cell[layer]]), trainable=False))
+		sample_hidden_state.append(tf.Variable(tf.zeros([1, neurons_per_cell[layer]]), trainable=False))
+		initial_sample_state.append(tf.contrib.rnn.LSTMStateTuple(sample_cell_state[layer], sample_hidden_state[layer]))
+
+	reset_sample_states = tf.group(*[tf.assign(sample_cell_state[layer],tf.zeros([1, neurons_per_cell[layer]])) for layer in range(num_layers)],
+                               *[tf.assign(sample_hidden_state[layer],tf.zeros([1, neurons_per_cell[layer]])) for layer in range(num_layers)])
+
+	sample_outputs, sample_state = tf.nn.dynamic_rnn(multi_cell, tf.expand_dims(sample_inputs,0),
+                                   initial_state=tuple(initial_sample_state),
+                                   time_major = True,
+                                   dtype=tf.float32)
+
+	with tf.control_dependencies([tf.assign(sample_cell_state[layer],sample_state[layer][0]) for layer in range(num_layers)]+
+								 [tf.assign(sample_hidden_state[layer],sample_state[layer][1]) for layer in range(num_layers)]):
+		sample_prediction = tf.nn.xw_plus_b(tf.reshape(sample_outputs,[1,-1]), w, b)
+
+
+	return sample_inputs, sample_prediction, reset_sample_states
+
 
 def training(train_data, test_data, all_preprocessed_data):
 	""" Perform model training.
@@ -375,6 +409,7 @@ def training(train_data, test_data, all_preprocessed_data):
 	drop_multi_cell, multi_cell, w, b = create_LSTM_layers(neurons_per_cell, num_layers, dropout)  #define LSTM layers
 	cell_state, hidden_state, state_tensor, split_outputs = calculate_LSTM_output(neurons_per_cell, num_layers, batch_size, train_inputs, time_steps, w, b, drop_multi_cell)  #Calculate LSTM layer output
 	optimizer = calculate_loss_and_optimize(cell_state, hidden_state, state_tensor, num_layers, time_steps, split_outputs, train_outputs, learning_decay_rate, clipping_ratio)
+	sample_inputs, sample_prediction, reset_sample_states = define_prediction_functions(num_layers, neurons_per_cell, dimensionality, multi_cell, w, b)
 
 def main():
 	train_data, test_data, all_preprocessed_data = preprocessing()
